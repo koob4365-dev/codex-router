@@ -84,6 +84,14 @@ const markerPairs = [
 ];
 const command = process.argv[2] || "status";
 const adoptNativeCatalog = process.argv.includes("--adopt-native-catalog");
+
+// Retired takeover: never reconfigure official Codex to point at this router.
+// Status, disable and signed-disable remain available to inspect/remove
+// existing router-owned settings without changing unrelated user preferences.
+if (new Set(["enable", "login-free-enable", "signed-enable"]).has(command)) {
+  console.error("Codex Router takeover is retired. Native Codex owns its model/provider/catalog; use status or disable to inspect/remove legacy settings.");
+  process.exit(2);
+}
 let nativeCatalogNeedsActivation = false;
 
 function configuredRouterBaseUrl() {

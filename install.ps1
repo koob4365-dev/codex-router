@@ -21,9 +21,8 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-if ($env:CODEX_ROUTER_ENABLE_LEGACY_TASK -ne '1') {
-  throw 'Legacy Windows Codex Router installer is disabled. Use native Codex/Copilot; no scheduled router service will be installed.'
-}
+# No environment flag may reactivate this legacy installer.
+throw 'Codex Router Windows installation is retired. No services or native Codex settings were changed.'
 $env:MODEL_ROUTER_TARGET = $Target
 if ($Target -ne "codex" -and $MigrateKnown) {
   throw "-MigrateKnown applies only to the Codex target."

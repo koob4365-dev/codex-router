@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Legacy takeover retired. Do not recreate old loopback services/config.
+printf '%s\n' 'Codex Router install/enable is retired. Native Codex settings are authoritative; disable/uninstall remain available.' >&2
+exit 2
+
 repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$repo_dir"
 case "${MODEL_ROUTER_TARGET:-codex}" in

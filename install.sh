@@ -1,6 +1,10 @@
 #!/bin/sh
 set -eu
 
+# Legacy takeover retired. Do not recreate old loopback services/config.
+printf '%s\n' 'Codex Router install/enable is retired. Native Codex settings are authoritative; disable/uninstall remain available.' >&2
+exit 2
+
 repository_url=${CODEX_ROUTER_REPOSITORY_URL:-https://github.com/duolahypercho/codex-router.git}
 default_data_dir=${XDG_DATA_HOME:-$HOME/.local/share}
 install_dir=$default_data_dir/codex-router
