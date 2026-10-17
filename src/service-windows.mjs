@@ -146,6 +146,9 @@ function installTask() {
   }
   const { execute, argument } = taskAction();
   const script = [
+    // Fail on non-terminating cmdlet errors too. This applies only inside this
+    // registration subprocess; it does not change the user's PowerShell settings.
+    "$ErrorActionPreference = 'Stop'",
     // The action strings travel through the environment so that the quotes
     // around the launcher path never pass through powershell.exe's -Command
     // reparse or the schtasks argument escaper.
@@ -277,30 +280,14 @@ if (command === "render") {
 } else if (command === "render-task") {
   process.stdout.write(`${JSON.stringify(taskAction())}\n`);
 } else if (command === "install") {
-  try {
-    // Writing the launchers belongs inside the try: renameSync over the .vbs
-    // raises a sharing violation while a running wscript.exe still holds it
-    // open, and that used to throw out of install with nothing to catch it.
-    writeLaunchers();
-    // An upgrade from the console-visible task may still have that instance
-    // running. Register-ScheduledTask -Force replaces the definition under the
-    // same task name, so no duplicate is left behind, but it does not stop the
-    // running instance, and MultipleInstances IgnoreNew would then drop the new
-    // hidden run — the console window would survive until the next logon.
-    endTask();
-    installTask();
-    // Registration does not start the router or add an at-logon trigger.
-  } catch {
-    // Scheduled-task creation can be restricted in a non-elevated terminal. The
-    // launchers are still written, so the install is reported as success and
-    // the caller can retry -- but endTask() has already stopped whatever was
-    // running by this point, so simply returning would take a working router
-    // down in exchange for nothing. Start whichever definition survived the
-    // failed registration. When none did there is nothing to restore: no
-    // snapshot was taken, and re-creating the old console-visible action would
-    // reintroduce the very defect this launcher exists to fix.
-    // Do not silently relaunch a previously registered task on failure.
-  }
+  // Let launcher or registration failures reach the caller. Never report
+  // success or silently relaunch a previously registered task on failure.
+  writeLaunchers();
+  // An upgrade from the console-visible task may still have that instance
+  // running. Replacing its definition does not stop that running instance.
+  endTask();
+  installTask();
+  // Registration does not start the router or add an at-logon trigger.
   process.stdout.write(`${JSON.stringify({ installed: true, path: wrapperPath })}\n`);
 } else if (command === "uninstall") {
   endTask();
@@ -340,3 +327,4 @@ if (command === "render") {
   schtasks(["/Run", "/TN", taskName], { quiet: true });
   process.stdout.write(`${JSON.stringify({ state: "running" })}\n`);
 }
+

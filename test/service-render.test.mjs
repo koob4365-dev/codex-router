@@ -434,7 +434,11 @@ test(
       assert.equal(result.status, 0, result.stderr);
       assert.equal(JSON.parse(result.stdout).installed, true);
       const calls = stubs.calls();
-      assert.ok(calls.some((call) => call.includes("Register-ScheduledTask")));
+      const registration = calls.find((call) => call.includes("Register-ScheduledTask"));
+      assert.ok(registration);
+      // This preference belongs to the isolated registration process, before
+      // any task cmdlet, so non-terminating PowerShell errors fail the install.
+      assert.match(registration, /-Command \$ErrorActionPreference = 'Stop'; \$action = New-ScheduledTaskAction/);
       assert.ok(!calls.some((call) => call.includes("/Run")));
       assert.ok(!calls.some((call) => call.includes("ONLOGON")));
       assert.ok(!calls.some((call) => call.includes("-RestartCount")));
@@ -457,11 +461,37 @@ test(
         PATH: stubs.path,
         CODEX_ROUTER_ENABLE_LEGACY_TASK: "1",
       });
+      assert.equal(typeof result.status, "number", result.error?.message);
       assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /Scheduled task registration failed without fallback/);
+      assert.equal(result.stdout, "");
       const calls = stubs.calls();
       assert.ok(calls.some((call) => call.includes("Register-ScheduledTask")));
       assert.ok(!calls.some((call) => call.includes("/Create")));
       assert.ok(!calls.some((call) => call.includes("/Run")));
+    } finally {
+      rmSync(temp, { recursive: true, force: true });
+    }
+  },
+);
+
+test(
+  "launcher write failures do not report installation success or touch tasks",
+  { skip: process.platform === "win32" },
+  () => {
+    const temp = mkdtempSync(path.join(os.tmpdir(), "codex-router-write-failure-"));
+    try {
+      const stubs = schedulerStubs(path.join(temp, "stubs"));
+      // A file in place of the state directory deterministically blocks writes.
+      writeFileSync(windowsStateDir(temp), "blocked");
+      const result = runWindowsService(temp, "install", {
+        PATH: stubs.path,
+        CODEX_ROUTER_ENABLE_LEGACY_TASK: "1",
+      });
+      assert.equal(typeof result.status, "number", result.error?.message);
+      assert.notEqual(result.status, 0);
+      assert.equal(result.stdout, "");
+      assert.deepEqual(stubs.calls(), []);
     } finally {
       rmSync(temp, { recursive: true, force: true });
     }
@@ -507,3 +537,4 @@ test(
     }
   },
 );
+
