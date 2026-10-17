@@ -21,6 +21,9 @@ const effectivePlatform = process.env.CODEX_ROUTER_SERVICE_PLATFORM || process.p
 const command = process.argv[2] || "status";
 const renderCommands = new Set(["render", "render-launcher", "render-task"]);
 const taskName = "Codex Router";
+// Windows auto-start is retired. Explicit manual invocations remain available,
+// but no installer should silently recreate an at-logon task.
+const allowLegacyTask = process.env.CODEX_ROUTER_ENABLE_LEGACY_TASK === "1";
 const wrapperPath = path.join(STATE_DIR, "start-codex-router.cmd");
 const launcherPath = path.join(STATE_DIR, "start-codex-router-hidden.vbs");
 
@@ -138,16 +141,18 @@ function taskAction() {
 }
 
 function installTask() {
+  if (!allowLegacyTask) {
+    throw new Error("Windows Codex Router background service is disabled. Use native Codex/Copilot.");
+  }
   const { execute, argument } = taskAction();
   const script = [
     // The action strings travel through the environment so that the quotes
     // around the launcher path never pass through powershell.exe's -Command
     // reparse or the schtasks argument escaper.
     "$action = New-ScheduledTaskAction -Execute $env:CODEX_ROUTER_TASK_EXECUTE -Argument $env:CODEX_ROUTER_TASK_ARGUMENT",
-    "$trigger = New-ScheduledTaskTrigger -AtLogOn -User ([Security.Principal.WindowsIdentity]::GetCurrent().Name)",
-    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew",
+    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew",
     "$principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited",
-    "Register-ScheduledTask -TaskName $env:CODEX_ROUTER_TASK -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force | Out-Null",
+    "Register-ScheduledTask -TaskName $env:CODEX_ROUTER_TASK -Action $action -Settings $settings -Principal $principal -Force | Out-Null",
   ].join("; ");
   try {
     execFileSync(
@@ -163,22 +168,8 @@ function installTask() {
         stdio: ["ignore", "ignore", "ignore"],
       },
     );
-  } catch {
-    schtasks(
-      [
-        "/Create",
-        "/TN",
-        taskName,
-        "/SC",
-        "ONLOGON",
-        "/TR",
-        `${execute} ${argument}`,
-        "/RL",
-        "LIMITED",
-        "/F",
-      ],
-      { quiet: true },
-    );
+  } catch (error) {
+    throw new Error(`Scheduled task registration failed without fallback: ${error.message}`);
   }
 }
 
@@ -276,6 +267,9 @@ if (
   process.exit(2);
 }
 
+if (["install", "start", "restart"].includes(command) && !allowLegacyTask) {
+  throw new Error("Legacy Windows scheduled-task routing disabled. Native Codex/Copilot remains available.");
+}
 if (command === "render") {
   process.stdout.write(wrapper());
 } else if (command === "render-launcher") {
@@ -295,7 +289,7 @@ if (command === "render") {
     // hidden run — the console window would survive until the next logon.
     endTask();
     installTask();
-    schtasks(["/Run", "/TN", taskName], { quiet: true });
+    // Registration does not start the router or add an at-logon trigger.
   } catch {
     // Scheduled-task creation can be restricted in a non-elevated terminal. The
     // launchers are still written, so the install is reported as success and
@@ -305,11 +299,7 @@ if (command === "render") {
     // failed registration. When none did there is nothing to restore: no
     // snapshot was taken, and re-creating the old console-visible action would
     // reintroduce the very defect this launcher exists to fix.
-    try {
-      if (taskExists()) schtasks(["/Run", "/TN", taskName], { quiet: true });
-    } catch {
-      // Nothing left to start; the caller's readiness check reports the failure.
-    }
+    // Do not silently relaunch a previously registered task on failure.
   }
   process.stdout.write(`${JSON.stringify({ installed: true, path: wrapperPath })}\n`);
 } else if (command === "uninstall") {

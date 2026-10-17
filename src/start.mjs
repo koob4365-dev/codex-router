@@ -17,6 +17,10 @@ import {
 import { waitForHealth as pollHealth } from "./health-probe.mjs";
 import { writeLiteLlmConfig } from "./litellm-config.mjs";
 
+if (process.platform === "win32" && process.env.CODEX_ROUTER_MANUAL_START !== "1") {
+  throw new Error("Codex Router cannot start on Windows without CODEX_ROUTER_MANUAL_START=1.");
+}
+
 const litellm =
   process.env.MODEL_ROUTER_LITELLM_BIN ||
   (TARGET === "codex"

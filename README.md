@@ -1,3 +1,21 @@
+> **Windows compatibility notice (2026-10-18):** The Windows scheduled
+> Codex Router integration is disabled by default. The native Codex and
+> GitHub Copilot runtimes do not require this router. Running the Windows
+> installer without an explicit legacy opt-in fails before modifying the
+> Codex configuration or starting any service. The existing `disable`
+> and `uninstall` entry points remain available for cleanup.
+>
+> Advanced opt-in is possible with `CODEX_ROUTER_ENABLE_LEGACY_TASK=1`;
+> the legacy task no longer registers an at-logon trigger or a restart
+> watchdog. An interactive manual `src/start.mjs` invocation requires
+> `CODEX_ROUTER_MANUAL_START=1`. These opt-ins never migrate an older
+> configuration automatically.
+>
+> Updating this repository does not remove an already installed Windows
+> task. First use the backed-up cleanup scripts in
+> [ai-infra](https://github.com/koob4365-dev/ai-infra/tree/main/tools/ps)
+> when Windows becomes accessible.
+
 # Codex Router
 
 Use Anthropic, Kimi, DeepSeek, xAI, GitHub Copilot, opencode Go, Command Code,

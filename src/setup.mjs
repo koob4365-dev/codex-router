@@ -313,6 +313,9 @@ function installTray() {
 }
 
 async function main() {
+  if (process.platform === "win32" && process.env.CODEX_ROUTER_ENABLE_LEGACY_TASK !== "1") {
+    throw incomplete("Windows Codex Router automatic integration is disabled. Use native Codex/Copilot instead.");
+  }
   if (setupArgumentError) throw incomplete(setupArgumentError);
   const legacy = detectLegacyInstallations();
   if (
