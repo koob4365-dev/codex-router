@@ -1,0 +1,5 @@
+{
+  "challenge_id": "AGENT-CHECKIN-20261017-3E9BA288",
+  "purpose": "one-shot read-only audit of public topic; no re-broadcast",
+  "version": 1
+}
