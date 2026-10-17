@@ -25,6 +25,11 @@ jobs:
       - run: npm ci
       - run: npm run check
       - run: npm test
+        env:
+          # CI tests explicitly opt in to exercise legacy fixture paths.
+          # Production Windows defaults remain disabled.
+          CODEX_ROUTER_ENABLE_LEGACY_TASK: "1"
+          CODEX_ROUTER_MANUAL_START: "1"
       - run: npm audit --omit=dev --audit-level=high
       - name: Check shell syntax
         if: runner.os != 'Windows'

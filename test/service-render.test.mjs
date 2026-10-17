@@ -338,52 +338,27 @@ test(
 );
 
 test(
-  "the Windows installer writes both launchers idempotently and uninstall removes both",
+  "the Windows auto-start installer is disabled by default",
   { skip: process.platform === "win32" },
   () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-install-"));
+    const temp = mkdtempSync(path.join(os.tmpdir(), "codex-router-native-default-"));
     try {
-      const stateDir = windowsStateDir(testRoot);
-      const wrapperPath = path.join(stateDir, "start-codex-router.cmd");
-      const launcherPath = path.join(stateDir, "start-codex-router-hidden.vbs");
-      const run = (command) =>
-        JSON.parse(serviceCommand("service-windows.mjs", "win32", testRoot, command));
-
-      // schtasks.exe and powershell.exe are absent off Windows, and every call
-      // to them is best effort, so only the generated files are exercised here.
-      assert.equal(run("install").installed, true);
-      assert.equal(existsSync(wrapperPath), true);
-      assert.equal(existsSync(launcherPath), true);
-
-      const bytes = readFileSync(launcherPath);
-      // wscript.exe falls back to the ANSI code page without this byte order
-      // mark, which corrupts a state directory holding non-ASCII characters.
-      assert.deepEqual([...bytes.subarray(0, 2)], [0xff, 0xfe]);
-      assert.match(bytes.toString("utf16le").slice(1), /^Option Explicit\r\n/);
-
-      // Reinstalling over an existing pair overwrites instead of failing.
-      assert.equal(run("install").installed, true);
-      assert.equal(readFileSync(launcherPath).equals(bytes), true);
-
-      assert.equal(run("uninstall").installed, false);
-      assert.equal(existsSync(wrapperPath), false);
-      assert.equal(existsSync(launcherPath), false);
-
-      // Uninstalling again must not fail on the already-removed launchers.
-      assert.equal(run("uninstall").installed, false);
+      const result = spawnSync(process.execPath, [path.join(root, "src", "service-windows.mjs"), "install"], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...serviceEnv("win32", temp), CODEX_ROUTER_ENABLE_LEGACY_TASK: "" },
+      });
+      assert.notEqual(result.status, 0);
+      assert.match(result.stderr, /disabled/i);
+      assert.equal(existsSync(windowsStateDir(temp)), false);
     } finally {
-      rmSync(testRoot, { recursive: true, force: true });
+      rmSync(temp, { recursive: true, force: true });
     }
   },
 );
 
-// Off Windows there is no schtasks.exe or powershell.exe, so every scheduler
-// call src/service-windows.mjs makes is a failure and the ordering between them
-// is invisible. Executable stubs of those names, first on PATH, make the whole
-// sequence observable and let one call be failed on demand -- which is the only
-// way to reach the recovery path without a Windows box and a restricted shell.
-// They can never shadow the real executables, because the tests that use them
-// are skipped on win32.
+// Legacy tests below are isolated with an explicit opt-in. This does not
+// authorize router installation or scheduling in the user's Windows.
 function schedulerStubs(directory, options = {}) {
   const { schtasksFail = "", powershellFail = "", runningQueries = 0 } = options;
   mkdirSync(directory, { recursive: true });
@@ -446,132 +421,49 @@ function runWindowsService(testRoot, command, extraEnv = {}) {
 }
 
 test(
-  "a blocked registration restarts whichever task definition survived",
+  "explicit legacy task registration does not start a router automatically",
   { skip: process.platform === "win32" },
   () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-recover-"));
+    const temp = mkdtempSync(path.join(os.tmpdir(), "codex-router-opt-in-"));
     try {
-      // Registration is blocked through both routes, the way a restricted or
-      // non-elevated terminal blocks it. endTask() has already stopped the
-      // running router by then, so returning here would trade a working install
-      // for nothing at all -- the regression this guards.
-      const stubs = schedulerStubs(path.join(testRoot, "survivor"), {
-        schtasksFail: "/Create",
-        powershellFail: "Register-ScheduledTask",
+      const stubs = schedulerStubs(path.join(temp, "stubs"));
+      const result = runWindowsService(temp, "install", {
+        PATH: stubs.path,
+        CODEX_ROUTER_ENABLE_LEGACY_TASK: "1",
       });
-      const result = runWindowsService(testRoot, "install", { PATH: stubs.path });
       assert.equal(result.status, 0, result.stderr);
       assert.equal(JSON.parse(result.stdout).installed, true);
-
       const calls = stubs.calls();
-      const at = (needle) => calls.findIndex((line) => line.includes(needle));
-      assert.ok(at("/End") >= 0, `no /End in:\n${calls.join("\n")}`);
-      assert.ok(
-        at("/End") < at("Register-ScheduledTask"),
-        `the running instance must be ended before re-registering:\n${calls.join("\n")}`,
-      );
-      // The surviving definition is queried before it is started: /Run against
-      // a name that failed to register recovers nothing and reports its own
-      // error over the one that actually matters.
-      assert.ok(
-        at("/Create") < at("/Query") && at("/Query") < at("/Run"),
-        `the recovery must query before it runs:\n${calls.join("\n")}`,
-      );
-      assert.equal(calls.filter((line) => line.includes("/Run")).length, 1);
+      assert.ok(calls.some((call) => call.includes("Register-ScheduledTask")));
+      assert.ok(!calls.some((call) => call.includes("/Run")));
+      assert.ok(!calls.some((call) => call.includes("ONLOGON")));
+      assert.ok(!calls.some((call) => call.includes("-RestartCount")));
     } finally {
-      rmSync(testRoot, { recursive: true, force: true });
+      rmSync(temp, { recursive: true, force: true });
     }
   },
 );
 
 test(
-  "a registration failure that leaves no task does not start one",
+  "registration failures do not create fallback tasks or relaunch the router",
   { skip: process.platform === "win32" },
   () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-no-task-"));
+    const temp = mkdtempSync(path.join(os.tmpdir(), "codex-router-no-fallback-"));
     try {
-      const stubs = schedulerStubs(path.join(testRoot, "gone"), {
-        schtasksFail: "/Create /Query",
+      const stubs = schedulerStubs(path.join(temp, "stubs"), {
         powershellFail: "Register-ScheduledTask",
       });
-      const result = runWindowsService(testRoot, "install", { PATH: stubs.path });
-      // Still best effort: the launchers are written and the caller retries.
-      assert.equal(result.status, 0, result.stderr);
-      assert.equal(JSON.parse(result.stdout).installed, true);
-
-      const calls = stubs.calls();
-      assert.ok(calls.some((line) => line.includes("/Query")));
-      assert.equal(
-        calls.some((line) => line.includes("/Run")),
-        false,
-        `nothing survived to start, so /Run must not be issued:\n${calls.join("\n")}`,
-      );
-    } finally {
-      rmSync(testRoot, { recursive: true, force: true });
-    }
-  },
-);
-
-test(
-  "install waits for the ended instance before starting the new one",
-  { skip: process.platform === "win32" },
-  () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-stop-wait-"));
-    try {
-      // schtasks /End returns before the instance is gone. Reporting Running
-      // for the first two state queries reproduces that window; a /Run issued
-      // inside it is dropped by MultipleInstances IgnoreNew.
-      const stubs = schedulerStubs(path.join(testRoot, "winding-down"), {
-        runningQueries: 2,
+      const result = runWindowsService(temp, "install", {
+        PATH: stubs.path,
+        CODEX_ROUTER_ENABLE_LEGACY_TASK: "1",
       });
-      const result = runWindowsService(testRoot, "install", { PATH: stubs.path });
-      assert.equal(result.status, 0, result.stderr);
-
+      assert.notEqual(result.status, 0);
       const calls = stubs.calls();
-      const states = calls.filter((line) => line.includes("Get-ScheduledTask"));
-      assert.equal(
-        states.length,
-        3,
-        `the wait must poll until the state leaves Running:\n${calls.join("\n")}`,
-      );
-      const lastState = calls.findLastIndex((line) => line.includes("Get-ScheduledTask"));
-      assert.ok(
-        lastState < calls.findIndex((line) => line.includes("/Run")),
-        `the new instance must start after the old one has gone:\n${calls.join("\n")}`,
-      );
+      assert.ok(calls.some((call) => call.includes("Register-ScheduledTask")));
+      assert.ok(!calls.some((call) => call.includes("/Create")));
+      assert.ok(!calls.some((call) => call.includes("/Run")));
     } finally {
-      rmSync(testRoot, { recursive: true, force: true });
-    }
-  },
-);
-
-test(
-  "an instance that never stops cannot hang the install",
-  { skip: process.platform === "win32" },
-  () => {
-    const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-win-stuck-"));
-    try {
-      // The state never leaves Running, so only the deadline can end the wait.
-      // Without it install would block forever and take the installer with it.
-      const stubs = schedulerStubs(path.join(testRoot, "stuck"), {
-        runningQueries: 1_000_000,
-      });
-      const result = runWindowsService(testRoot, "install", { PATH: stubs.path });
-      assert.equal(result.status, 0, result.stderr);
-
-      const calls = stubs.calls();
-      const states = calls.filter((line) => line.includes("Get-ScheduledTask"));
-      assert.ok(states.length > 1, "the wait must have polled more than once");
-      assert.ok(
-        states.length < 500,
-        `the wait must be bounded, not merely slow: ${states.length} state queries`,
-      );
-      // Giving up is not giving in: the install still registers and starts the
-      // task, and the readiness check downstream is what reports a router that
-      // never came back.
-      assert.ok(calls.some((line) => line.includes("/Run")));
-    } finally {
-      rmSync(testRoot, { recursive: true, force: true });
+      rmSync(temp, { recursive: true, force: true });
     }
   },
 );
