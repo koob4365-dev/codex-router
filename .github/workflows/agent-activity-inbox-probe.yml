@@ -36,7 +36,7 @@ jobs:
           pongs=[m for m in matched if m.get('message','').startswith('PONG ')]
           agents=set()
           for m in pongs:
-              match=re.search(r'(?:^|\\|)\\s*agent=([A-Za-z0-9_.-]{1,64})', m.get('message',''))
+              match=re.search(r'agent=([A-Za-z0-9_.-]{1,64})', m.get('message',''))
               if match: agents.add(match.group(1))
           print('PUBLIC_TOPIC_MESSAGES=',len(messages))
           print('HELLO_RECEIVED_COUNT=',len(hello))
