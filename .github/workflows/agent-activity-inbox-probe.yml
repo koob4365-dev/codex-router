@@ -1,0 +1,46 @@
+name: Agent Activity Inbox Probe
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'agent-activity/probe.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.repository == 'koob4365-dev/codex-router'
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Read public ntfy inbox and count response claims
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl --fail --show-error --silent --retry 2 --max-time 20 \
+            'https://ntfy.sh/agent-checkin-20261017-3e9ba288-56bf14/json?poll=1' > /tmp/checkins.jsonl
+          python3 - <<'PY'
+          import json, re
+          challenge='AGENT-CHECKIN-20261017-3E9BA288'
+          messages=[]
+          with open('/tmp/checkins.jsonl',encoding='utf-8') as f:
+              for line in f:
+                  try:
+                      data=json.loads(line)
+                      if data.get('event')=='message': messages.append(data)
+                  except (ValueError,TypeError): pass
+          matched=[m for m in messages if challenge in m.get('message','')]
+          hello=[m for m in matched if m.get('message','').startswith('HELLO AGENTS')]
+          pongs=[m for m in matched if m.get('message','').startswith('PONG ')]
+          agents=set()
+          for m in pongs:
+              match=re.search(r'(?:^|\\|)\\s*agent=([A-Za-z0-9_.-]{1,64})', m.get('message',''))
+              if match: agents.add(match.group(1))
+          print('PUBLIC_TOPIC_MESSAGES=',len(messages))
+          print('HELLO_RECEIVED_COUNT=',len(hello))
+          print('UNVERIFIED_PONG_MESSAGES=',len(pongs))
+          print('UNVERIFIED_CLAIMED_AGENT_NAMES=',len(agents))
+          print('AUTHENTICATED_EXTERNAL_AGENTS=unknown (this topic does not authenticate posters)')
+          PY
