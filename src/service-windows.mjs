@@ -21,9 +21,8 @@ const effectivePlatform = process.env.CODEX_ROUTER_SERVICE_PLATFORM || process.p
 const command = process.argv[2] || "status";
 const renderCommands = new Set(["render", "render-launcher", "render-task"]);
 const taskName = "Codex Router";
-// Windows auto-start is retired. Explicit manual invocations remain available,
-// but no installer should silently recreate an at-logon task.
-const allowLegacyTask = process.env.CODEX_ROUTER_ENABLE_LEGACY_TASK === "1";
+// Windows router auto-start is fully retired. No environment flag may
+// restore installation or execution of the old scheduled task.
 const wrapperPath = path.join(STATE_DIR, "start-codex-router.cmd");
 const launcherPath = path.join(STATE_DIR, "start-codex-router-hidden.vbs");
 
@@ -141,36 +140,7 @@ function taskAction() {
 }
 
 function installTask() {
-  if (!allowLegacyTask) {
-    throw new Error("Windows Codex Router background service is disabled. Use native Codex/Copilot.");
-  }
-  const { execute, argument } = taskAction();
-  const script = [
-    // The action strings travel through the environment so that the quotes
-    // around the launcher path never pass through powershell.exe's -Command
-    // reparse or the schtasks argument escaper.
-    "$action = New-ScheduledTaskAction -Execute $env:CODEX_ROUTER_TASK_EXECUTE -Argument $env:CODEX_ROUTER_TASK_ARGUMENT",
-    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew",
-    "$principal = New-ScheduledTaskPrincipal -UserId ([Security.Principal.WindowsIdentity]::GetCurrent().Name) -LogonType Interactive -RunLevel Limited",
-    "Register-ScheduledTask -TaskName $env:CODEX_ROUTER_TASK -Action $action -Settings $settings -Principal $principal -Force | Out-Null",
-  ].join("; ");
-  try {
-    execFileSync(
-      "powershell.exe",
-      ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", script],
-      {
-        env: {
-          ...process.env,
-          CODEX_ROUTER_TASK: taskName,
-          CODEX_ROUTER_TASK_EXECUTE: execute,
-          CODEX_ROUTER_TASK_ARGUMENT: argument,
-        },
-        stdio: ["ignore", "ignore", "ignore"],
-      },
-    );
-  } catch (error) {
-    throw new Error(`Scheduled task registration failed without fallback: ${error.message}`);
-  }
+  throw new Error("Legacy Windows Codex Router task registration is retired.");
 }
 
 // `schtasks /End` returns once Task Scheduler has accepted the request, not
@@ -267,7 +237,7 @@ if (
   process.exit(2);
 }
 
-if (["install", "start", "restart"].includes(command) && !allowLegacyTask) {
+if (["install", "start", "restart"].includes(command)) {
   throw new Error("Legacy Windows scheduled-task routing disabled. Native Codex/Copilot remains available.");
 }
 if (command === "render") {

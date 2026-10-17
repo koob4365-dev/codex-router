@@ -190,78 +190,14 @@ export function installationNeedsRefresh(manifest, revision) {
   return manifest?.current?.commit !== revision;
 }
 
-export function updateCheckout({ force = false } = {}) {
-  const status = checkForUpdate();
-  if (!status.updateAvailable) {
-    if (!installationNeedsRefresh(readInstallManifest(), status.current)) {
-      return { ...status, updated: false, reinstalled: false };
-    }
-    installCurrentCheckout();
-    refreshTrayCompanion();
-    return { ...status, updated: false, reinstalled: true };
-  }
-  requireReplaceableCheckout(force);
-  let branch = git(["branch", "--show-current"]);
-  if (!branch) {
-    git(["switch", "main"], { inherit: true });
-    branch = "main";
-  }
-  if (branch !== "main") {
-    throw new Error("Updates require the managed checkout to be on its main branch.");
-  }
-  git(["update-ref", "refs/codex-router/rollback", status.current]);
-  git(["merge", "--ff-only", status.available], { inherit: true });
-  try {
-    installCurrentCheckout();
-    refreshTrayCompanion();
-  } catch (error) {
-    try {
-      restoreRevision(status.current);
-    } catch (restoreError) {
-      throw new AggregateError(
-        [error, restoreError],
-        `Update failed and automatic rollback also failed. The previous commit is ${status.current}.`,
-      );
-    }
-    throw new Error(
-      `Update failed; Codex Router was restored to ${status.current.slice(0, 12)}.`,
-      { cause: error },
-    );
-  }
-  return { ...status, updated: true, reinstalled: true };
+// Retired: historical update/rollback snapshots may recreate loopback gateways,
+// startup services, and managed Codex configs. Read-only checks remain possible.
+export function updateCheckout(_options = {}) {
+  throw new Error("Codex Router is retired; its update and reinstall paths are disabled.");
 }
 
-export function rollbackCheckout({ force = false } = {}) {
-  requireManagedCheckout();
-  // A rollback checks out a different revision, so it overwrites tracked edits
-  // exactly the way an update does.
-  requireReplaceableCheckout(force);
-  const current = git(["rev-parse", "HEAD"]);
-  let target;
-  try {
-    target = git(["rev-parse", "refs/codex-router/rollback"]);
-  } catch {
-    target = readInstallManifest()?.history?.find((entry) => entry.commit)?.commit;
-  }
-  if (!target || !revisionExists(target)) {
-    throw new Error("No locally cached working revision is available to roll back to.");
-  }
-  if (target === current) throw new Error("The rollback revision is already installed.");
-  git(["update-ref", "refs/codex-router/rollback", current]);
-  try {
-    restoreRevision(target);
-  } catch (error) {
-    try {
-      restoreRevision(current);
-    } catch (restoreError) {
-      throw new AggregateError(
-        [error, restoreError],
-        `Rollback failed and the current revision could not be restored (${current}).`,
-      );
-    }
-    throw error;
-  }
-  return { rolledBack: true, from: current, to: target };
+export function rollbackCheckout(_options = {}) {
+  throw new Error("Codex Router rollback is retired; old revisions may reactivate Codex takeover.");
 }
 
 const COMMANDS = {
