@@ -185,6 +185,12 @@ if (!new Set(["install", "uninstall", "start", "stop", "restart", "status", "ren
   process.exit(2);
 }
 
+// Legacy service reactivation is retired. Read-only inspection, stop and
+// uninstall still work against previously installed services.
+if (["install", "start", "restart"].includes(command)) {
+  throw new Error("Codex Router service reactivation is retired. Native Codex owns the connection.");
+}
+
 if (command === "render") {
   process.stdout.write(plist());
 } else if (command === "status") {

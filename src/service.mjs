@@ -17,6 +17,11 @@ if (!script) {
 }
 
 const command = process.argv[2] || "status";
+// The dispatcher must not call installers or resume previously installed
+// gateway services. Cleanup and read-only status remain available.
+if (["install", "start", "restart"].includes(command)) {
+  throw new Error("Codex Router service reactivation is retired. Use status, stop or uninstall.");
+}
 const mutatingCommands = new Set(["install", "uninstall", "start", "stop", "restart"]);
 const readinessCommands = new Set(["install", "start", "restart"]);
 // start.mjs allows the LiteLLM gateway 300s to cold start, so the readiness
